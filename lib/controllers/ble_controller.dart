@@ -16,7 +16,8 @@ class BleController extends ChangeNotifier {
 
   // Getter qui retourne la liste des appareils filtrée.
   List<ScanResult> get filteredScanResults {
-    if (_filterText.isEmpty) {
+    return scanResults;
+    /*if (_filterText.isEmpty) {
       return scanResults;
     } else {
       // Filtre les résultats dont le nom de l'appareil contient le texte du filtre (insensible à la casse)
@@ -25,7 +26,7 @@ class BleController extends ChangeNotifier {
               .toLowerCase()
               .contains(_filterText.toLowerCase()))
           .toList();
-    }
+    }*/
   }
 
   // Méthode pour mettre à jour le texte du filtre depuis l'UI.
@@ -76,34 +77,25 @@ class BleController extends ChangeNotifier {
       debugPrint("Impossible de scanner : Permissions manquantes, scan en cours ou Bluetooth éteint.");
       return;
     }
-
     scanResults.clear(); // MODIFIÉ : Vider la liste des résultats de scan.
     isScanning = true;
     notifyListeners();
 
     _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
       // MODIFIÉ : Logique pour ajouter/mettre à jour les résultats dans la liste.
-      for (ScanResult r in results) {
-        // Trouve l'index d'un résultat existant pour le même appareil.
-        int index = scanResults.indexWhere((res) => res.device.remoteId == r.device.remoteId);
-        if (index != -1) {
-          // Si l'appareil est déjà dans la liste, on met à jour le résultat.
-          scanResults[index] = r;
-        } else {
-          // Sinon, on l'ajoute.
-          if(r.device.platformName.isNotEmpty) {
-             scanResults.add(r);
-          }
-        }
-      }
+      scanResults=results;
       notifyListeners();
-    }, onError: (e) => debugPrint("Erreur de scan: $e"));
 
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10)); // Durée augmentée un peu
+    FlutterBluePlus.startScan(timeout: const Duration(seconds: 10)); // Durée augmentée un peu
 
-    isScanning = false;
-    await _scanSubscription?.cancel();
-    notifyListeners();
+    Future.delayed(Duration(seconds:11),(){
+      isScanning = false;
+      notifyListeners();//for scan button state update
+    });
+
+    //await _scanSubscription?.cancel();
+    //notifyListeners();
+    
   }
 
   void stopScan() {
