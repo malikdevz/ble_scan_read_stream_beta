@@ -10,16 +10,23 @@ class ScanScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Utiliser 'watch' pour que l'UI se reconstruise lors des notifications
+    // Watch pour reconstruire l'UI lors des notifications
     final ble = context.watch<BleController>();
-    // Utiliser 'read' pour appeler des fonctions sans reconstruire
+    // Read pour appeler des fonctions sans reconstruire
     final bleReader = context.read<BleController>();
+    // Liste de filtres possibles
+    final Map<String, String?> filters = {
+      'All': null, // Aucun filtre
+      'Audio Devices': '110B', // UUID Audio Sink
+      'Smartwatches': 'WATCH', // On peut filtrer par nom contenant "WATCH"
+    };
+
 
     return Scaffold(
       appBar: AppBar(title: const Text('BLE Scanner')),
       body: Column(
         children: [
-          // --- WIDGET POUR L'ÉTAT DU BLUETOOTH ---
+          // --- État du Bluetooth ---
           if (ble.adapterState == BluetoothAdapterState.off)
             Container(
               color: Colors.red.withOpacity(0.9),
@@ -32,53 +39,122 @@ class ScanScreen extends StatelessWidget {
               ),
             ),
 
-          // --- CHAMP DE TEXTE POUR LE FILTRAGE ---
+          // --- Permissions ---
+          if (!ble.blePermissions)
+            Container(
+              color: Colors.red.withOpacity(0.9),
+              width: double.infinity,
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'All the requested permissions are necessary for the proper functioning of the application and are used solely for that purpose, so you must grant them.',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(40)),
+                    onPressed: ble.blePermissions ? null : bleReader.requestPermission,
+                    child: const Text('Grant permissions'),
+                  ),
+                ],
+              ),
+            ),
+
+          Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+              child: Row(
+                children: [
+                  const Text(
+                    'Filter by:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: DropdownButton<String>(
+                      value: ble.deviceTypeFilter, // variable du controller
+                      items: filters.keys.map((filter) {
+                        return DropdownMenuItem<String>(
+                          value: filter,
+                          child: Text(filter),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          bleReader.updateDeviceTypeFilter(value);
+                        }
+                      },
+                      isExpanded: true,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          // --- Champ de filtrage ---
           Padding(
             padding: const EdgeInsets.all(12.0),
             child: TextField(
               decoration: InputDecoration(
-                labelText: 'Filter by device name',
+                labelText: 'Search a device name in list',
                 prefixIcon: const Icon(Icons.search),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8.0),
                 ),
               ),
-              onChanged: bleReader.updateFilter, // Appelle la méthode du contrôleur
+              onChanged: bleReader.updateFilter,
             ),
           ),
 
-          // --- BOUTON DE SCAN ---
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0),
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(40)),
-              // Désactive le bouton si le scan est en cours ou si le bluetooth est éteint
-              onPressed: (ble.isScanning || ble.adapterState != BluetoothAdapterState.on)
-                  ? null
-                  : bleReader.startScan,
-              child: Text(ble.isScanning ? 'Scanning in progress...' : 'Start Scan'),
+          // --- Scan State + Bouton Start/Stop ---
+          if (ble.blePermissions)
+            Container(
+              color: Colors.blue.withOpacity(0.9),
+              width: double.infinity,
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    ble.scanStateLabel,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(40)),
+                    onPressed: (ble.adapterState != BluetoothAdapterState.on)
+                        ? null
+                        : ble.isScanning
+                            ? bleReader.stopScan
+                            : bleReader.startScan,
+                    child: Text(ble.isScanning ? 'Stop Scan' : 'Start Scan'),
+                  ),
+                ],
+              ),
             ),
-          ),
 
           const SizedBox(height: 10),
 
-          // --- LISTE DES APPAREILS FILTRÉS ---
+          // --- Liste des appareils filtrés ---
           Expanded(
-            // Utilise la liste filtrée du contrôleur
             child: ble.filteredScanResults.isEmpty
-                ? const Center(child: Text('No devices found'))
+                ? ble.isScanning
+                    ? const Center(child: CircularProgressIndicator())
+                    : const Center(child: Text('No devices found'))
                 : ListView.builder(
                     itemCount: ble.filteredScanResults.length,
                     itemBuilder: (context, index) {
                       final result = ble.filteredScanResults[index];
                       return DeviceTile(
-                        result: result, // Passe le ScanResult complet
+                        result: result,
                         onTap: () {
-                          bleReader.stopScan(); // Bonne pratique : arrêter le scan avant de naviguer
+                          bleReader.stopScan();
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => DeviceDetailScreen(device: result.device),
+                              builder: (_) => DeviceDetailScreen(result: result),
                             ),
                           );
                         },

@@ -4,6 +4,8 @@ import 'controllers/ble_controller.dart';
 import 'screens/scan_screen.dart';
 
 void main() {
+
+
   runApp(
     MultiProvider(
       providers: [

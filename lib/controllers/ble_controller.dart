@@ -6,35 +6,62 @@ import 'package:permission_handler/permission_handler.dart';
 enum BleConnectionState { disconnected, connecting, connected, disconnecting }
 
 class BleController extends ChangeNotifier {
-  // MODIFIÉ : On stocke les ScanResult pour avoir accès au RSSI.
   List<ScanResult> scanResults = [];
   bool isScanning = false;
+  String scanStateLabel = "Click on StartScan button to detect nearby BLE devices!";
+  String deviceConnectState="Disconnectd";
+  //BluetoothDevice device;
+  bool blePermissions = true; // Assume true initially, will be checked.
+
+
   StreamSubscription<List<ScanResult>>? _scanSubscription;
 
   // --- AJOUTS POUR LE FILTRAGE ---
   String _filterText = "";
+  String deviceTypeFilter = 'All';
 
-  // Getter qui retourne la liste des appareils filtrée.
+  void updateDeviceTypeFilter(String filter) {
+    deviceTypeFilter = filter;
+    notifyListeners();
+  }
+
+  // Dans filteredScanResults :
   List<ScanResult> get filteredScanResults {
-    return scanResults;
-    /*if (_filterText.isEmpty) {
+    var results = scanResults;
+    
+    // Filtre par nom
+    if (_filterText.isNotEmpty) {
+      results = results.where((r) => r.device.name.toLowerCase().contains(_filterText.toLowerCase())).toList();
+    }
+
+    // Filtre par type
+    if (deviceTypeFilter == 'Audio Devices') {
+      results = results.where((r) => r.advertisementData.serviceUuids.contains('0000110B-0000-1000-8000-00805F9B34FB')).toList();
+    } else if (deviceTypeFilter == 'Smartwatches') {
+      results = results.where((r) => r.device.name.toLowerCase().contains('watch')).toList();
+    }
+
+    return results;
+  }
+
+
+  /*List<ScanResult> get filteredScanResults {
+    if (_filterText.isEmpty) {
       return scanResults;
     } else {
-      // Filtre les résultats dont le nom de l'appareil contient le texte du filtre (insensible à la casse)
       return scanResults
           .where((result) => result.device.platformName
               .toLowerCase()
               .contains(_filterText.toLowerCase()))
           .toList();
-    }*/
-  }
+    }
+  }*/
 
-  // Méthode pour mettre à jour le texte du filtre depuis l'UI.
   void updateFilter(String text) {
     _filterText = text;
     notifyListeners();
   }
-  
+
   // --- Le reste de la classe (gestion de la connexion, état, etc.) ---
   BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown;
   StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription;
@@ -49,15 +76,19 @@ class BleController extends ChangeNotifier {
   BleController() {
     _adapterStateSubscription = FlutterBluePlus.adapterState.listen((state) {
       _adapterState = state;
-      debugPrint("État de l'adaptateur Bluetooth : $state");
+      debugPrint("On start Bluetooth state: $state");
       if (state != BluetoothAdapterState.on) {
-        _resetConnection();
+        _resetConnection(); // Now correctly inside the class
       }
+      checkPermissions().then((_) { // Use then with _ as we don't need the return value here
+        notifyListeners();
+      });
       notifyListeners();
     });
   }
 
-  Future<bool> checkPermissions() async {
+  // Check and ask for permissions
+  Future<bool> checkAndAskPermissions() async {
     Map<Permission, PermissionStatus> statuses = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
@@ -67,49 +98,124 @@ class BleController extends ChangeNotifier {
                    statuses[Permission.bluetoothConnect]!.isGranted &&
                    statuses[Permission.location]!.isGranted;
     if (!granted) {
-      debugPrint("Permissions manquantes !");
+      debugPrint("Missing permissions !");
     }
     return granted;
   }
 
+  // Use to check permission without ask for them
+  Future<void> checkPermissions() async {
+    bool scanGranted = await Permission.bluetoothScan.isGranted;
+    bool connectGranted = await Permission.bluetoothConnect.isGranted;
+    bool locationGranted = await Permission.location.isGranted;
+
+    if (!scanGranted || !connectGranted || !locationGranted) {
+      debugPrint("Users didn't allow one or more necessary permissions");
+      blePermissions = false;
+    } else {
+      debugPrint("All permissions granted");
+      blePermissions = true;
+    }
+  }
+
+  // Marked as async
+  void requestPermission() async {
+    bool result = await checkAndAskPermissions();
+    blePermissions = result; // No need for ternary if it's already a bool
+    notifyListeners();
+  }
+
   void startScan() async {
-    if (!await checkPermissions() || isScanning || _adapterState != BluetoothAdapterState.on) {
-      debugPrint("Impossible de scanner : Permissions manquantes, scan en cours ou Bluetooth éteint.");
+    //initialise filter and search by name
+    deviceTypeFilter='All';
+    updateFilter("");
+    if (!await checkAndAskPermissions() || isScanning || _adapterState != BluetoothAdapterState.on) {
+      debugPrint("Can't scan, no permissions or there is other scan on process or ble is disabled");
       return;
     }
-    scanResults.clear(); // MODIFIÉ : Vider la liste des résultats de scan.
+    scanResults.clear();
     isScanning = true;
+    scanStateLabel = "Scan on process....";
     notifyListeners();
 
+    // Start listening for scan results FIRST
     _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
-      // MODIFIÉ : Logique pour ajouter/mettre à jour les résultats dans la liste.
-      scanResults=results;
+      scanResults = results;
       notifyListeners();
-
-    FlutterBluePlus.startScan(timeout: const Duration(seconds: 10)); // Durée augmentée un peu
-
-    Future.delayed(Duration(seconds:11),(){
-      isScanning = false;
-      notifyListeners();//for scan button state update
     });
 
-    //await _scanSubscription?.cancel();
-    //notifyListeners();
-    
+    // Then start the scan itself
+    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
+
+    // The scan will automatically stop after 10 seconds due to the timeout
+    // We can then update the UI state.
+    // It's better to listen to FlutterBluePlus.isScanning stream for accurate state,
+    // but for simplicity, we'll use a delayed future matching the scan timeout.
+    // A more robust solution would be to listen to FlutterBluePlus.isScanning.
+    Future.delayed(const Duration(seconds: 11), () { // A little after the scan timeout
+      if (isScanning) { // Only update if still scanning (not manually stopped)
+        isScanning = false;
+        int nbrDevicesFounded = scanResults.length;
+        scanStateLabel = "Scan Terminated, $nbrDevicesFounded Devices founded";
+        _scanSubscription?.cancel(); // Cancel subscription when scan is done
+        notifyListeners();
+      }
+    });
   }
 
   void stopScan() {
     FlutterBluePlus.stopScan();
     isScanning = false;
-    _scanSubscription?.cancel();
+    _scanSubscription?.cancel(); // Ensure subscription is cancelled
+    scanStateLabel = "Click on StartScan button to detect nearby BLE devices!";
     notifyListeners();
   }
 
-  // Le reste des méthodes (connect, disconnect, etc.) reste inchangé.
-  Future<void> connect(BluetoothDevice device) async { /* ... code inchangé ... */ }
-  Future<void> disconnect() async { /* ... code inchangé ... */ }
-  Future<void> _discoverServices() async { /* ... code inchangé ... */ }
-  void _resetConnection() { /* ... code inchangé ... */ }
+  // Le reste des méthodes (connect, disconnect, etc.)
+  Future<void> connect(BluetoothDevice device) async {
+    // ... code inchangé ...
+    /*_connectionState = BleConnectionState.connecting;
+    notifyListeners();
+    try {
+      await device.connect();
+      connectedDevice = device;
+      _connectionState = BleConnectionState.connected;
+      _connectionStateSubscription = device.connectionState.listen((state) {
+        if (state == BluetoothConnectionState.disconnected) {
+          _resetConnection();
+        }
+      });
+      await _discoverServices();
+    } catch (e) {
+      debugPrint("Failed to connect: $e");
+      _resetConnection();
+    }
+    notifyListeners();*/
+  }
+
+  Future<void> disconnect() async {
+    if (connectedDevice != null) {
+      _connectionState = BleConnectionState.disconnecting;
+      notifyListeners();
+      await connectedDevice!.disconnect();
+      _resetConnection();
+    }
+    notifyListeners();
+  }
+
+  Future<void> _discoverServices() async {
+    if (connectedDevice == null) return;
+    services = await connectedDevice!.discoverServices();
+    notifyListeners();
+  }
+
+  void _resetConnection() {
+    connectedDevice = null;
+    services.clear();
+    _connectionState = BleConnectionState.disconnected;
+    _connectionStateSubscription?.cancel();
+    notifyListeners();
+  }
 
   @override
   void dispose() {
