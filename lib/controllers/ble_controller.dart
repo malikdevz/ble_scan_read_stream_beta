@@ -6,158 +6,160 @@ import 'package:permission_handler/permission_handler.dart';
 enum BleConnectionState { disconnected, connecting, connected, disconnecting }
 
 class BleController extends ChangeNotifier {
+  // --- PRINCIPLES VARIABLES ---
   List<ScanResult> scanResults = [];
   bool isScanning = false;
-  String scanStateLabel = "Click on StartScan button to detect nearby BLE devices!";
-  String deviceConnectState="Disconnectd";
-  //BluetoothDevice device;
-  bool blePermissions = true; // Assume true initially, will be checked.
+  String scanStateLabel = "Click on Start Scan button to detect nearby BLE devices!";
+  bool blePermissions = true;
+  int mtu = 0;
+  int retry_connection=3;
+  bool isOnRetry=false;
+  bool showfeebck=false;
 
-
+  // --- STREAMS ET FILTERS ---
   StreamSubscription<List<ScanResult>>? _scanSubscription;
+  StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription;
+  StreamSubscription<BluetoothConnectionState>? _connectionStateSubscription;
 
-  // --- AJOUTS POUR LE FILTRAGE ---
   String _filterText = "";
   String deviceTypeFilter = 'All';
 
+  // --- CONSTANTES  ---
+  static const AUDIO_UUID = '0000110B-0000-1000-8000-00805F9B34FB';
+
+  // --- BLUETOOTH STATE---
+  BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown;
+  BluetoothDevice? connectedDevice;
+  BleConnectionState _connectionState = BleConnectionState.disconnected;
+  List<BluetoothService> services = [];
+
+  // --- GETTERS ---
+  BluetoothAdapterState get adapterState => _adapterState;
+  BleConnectionState get connectionState => _connectionState;
+
+  // --- CONSTRUCTOR ---
+  BleController() {
+    _adapterStateSubscription = FlutterBluePlus.adapterState.listen((state) {
+      _adapterState = state;
+      debugPrint("Bluetooth state changed: $state");
+
+      if (state != BluetoothAdapterState.on) {
+        _resetConnection();
+      }
+
+      checkPermissions().then((_) => notifyListeners());
+      notifyListeners();
+    });
+  }
+
+  // --- FILTERS ---
   void updateDeviceTypeFilter(String filter) {
     deviceTypeFilter = filter;
     notifyListeners();
   }
+   void updateFilter(String text) {
+    print(text);
+    _filterText = text;
+    notifyListeners();
+  }
 
-  // Dans filteredScanResults :
   List<ScanResult> get filteredScanResults {
     var results = scanResults;
-    
-    // Filtre par nom
+    // by nom
     if (_filterText.isNotEmpty) {
-      results = results.where((r) => r.device.name.toLowerCase().contains(_filterText.toLowerCase())).toList();
+      results = results
+          .where((r) => r.device.name.toLowerCase().contains(_filterText.toLowerCase()))
+          .toList();
+      //we should not apply filter by name for device without name
+      results=results+scanResults
+          .where((r) => r.device.platformName.isEmpty)
+          .toList();
     }
 
-    // Filtre par type
+    // by device type
     if (deviceTypeFilter == 'Audio Devices') {
-      results = results.where((r) => r.advertisementData.serviceUuids.contains('0000110B-0000-1000-8000-00805F9B34FB')).toList();
+      results = results
+          .where((r) => r.advertisementData.serviceUuids.contains(AUDIO_UUID))
+          .toList();
     } else if (deviceTypeFilter == 'Smartwatches') {
-      results = results.where((r) => r.device.name.toLowerCase().contains('watch')).toList();
+      results = results
+          .where((r) => r.device.name.toLowerCase().contains('watch'))
+          .toList();
     }
 
     return results;
   }
 
-
-  /*List<ScanResult> get filteredScanResults {
-    if (_filterText.isEmpty) {
-      return scanResults;
-    } else {
-      return scanResults
-          .where((result) => result.device.platformName
-              .toLowerCase()
-              .contains(_filterText.toLowerCase()))
-          .toList();
-    }
-  }*/
-
-  void updateFilter(String text) {
-    _filterText = text;
-    notifyListeners();
-  }
-
-  // --- Le reste de la classe (gestion de la connexion, état, etc.) ---
-  BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown;
-  StreamSubscription<BluetoothAdapterState>? _adapterStateSubscription;
-  BluetoothDevice? connectedDevice;
-  BleConnectionState _connectionState = BleConnectionState.disconnected;
-  StreamSubscription<BluetoothConnectionState>? _connectionStateSubscription;
-  List<BluetoothService> services = [];
-
-  BluetoothAdapterState get adapterState => _adapterState;
-  BleConnectionState get connectionState => _connectionState;
-
-  BleController() {
-    _adapterStateSubscription = FlutterBluePlus.adapterState.listen((state) {
-      _adapterState = state;
-      debugPrint("On start Bluetooth state: $state");
-      if (state != BluetoothAdapterState.on) {
-        _resetConnection(); // Now correctly inside the class
-      }
-      checkPermissions().then((_) { // Use then with _ as we don't need the return value here
-        notifyListeners();
-      });
-      notifyListeners();
-    });
-  }
-
-  // Check and ask for permissions
+  // --- PERMISSIONS ---
   Future<bool> checkAndAskPermissions() async {
-    Map<Permission, PermissionStatus> statuses = await [
+    final statuses = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
       Permission.location,
     ].request();
-    bool granted = statuses[Permission.bluetoothScan]!.isGranted &&
-                   statuses[Permission.bluetoothConnect]!.isGranted &&
-                   statuses[Permission.location]!.isGranted;
+
+    final granted = statuses[Permission.bluetoothScan]!.isGranted &&
+        statuses[Permission.bluetoothConnect]!.isGranted &&
+        statuses[Permission.location]!.isGranted;
+
     if (!granted) {
-      debugPrint("Missing permissions !");
+      debugPrint("Missing one or more permissions!");
     }
+
     return granted;
   }
 
-  // Use to check permission without ask for them
   Future<void> checkPermissions() async {
-    bool scanGranted = await Permission.bluetoothScan.isGranted;
-    bool connectGranted = await Permission.bluetoothConnect.isGranted;
-    bool locationGranted = await Permission.location.isGranted;
+    final scanGranted = await Permission.bluetoothScan.isGranted;
+    final connectGranted = await Permission.bluetoothConnect.isGranted;
+    final locationGranted = await Permission.location.isGranted;
 
-    if (!scanGranted || !connectGranted || !locationGranted) {
-      debugPrint("Users didn't allow one or more necessary permissions");
-      blePermissions = false;
+    blePermissions = scanGranted && connectGranted && locationGranted;
+
+    if (!blePermissions) {
+      debugPrint("User didn't allow one or more necessary permissions");
     } else {
       debugPrint("All permissions granted");
-      blePermissions = true;
     }
   }
 
-  // Marked as async
   void requestPermission() async {
-    bool result = await checkAndAskPermissions();
-    blePermissions = result; // No need for ternary if it's already a bool
+    blePermissions = await checkAndAskPermissions();
     notifyListeners();
   }
 
+  // --- SCAN ---
   void startScan() async {
-    //initialise filter and search by name
-    deviceTypeFilter='All';
+    // Réinitialise filtres
+    updateDeviceTypeFilter('All');
     updateFilter("");
+
     if (!await checkAndAskPermissions() || isScanning || _adapterState != BluetoothAdapterState.on) {
-      debugPrint("Can't scan, no permissions or there is other scan on process or ble is disabled");
+      debugPrint("Can't start scan: missing permissions, already scanning, or Bluetooth disabled.");
       return;
     }
+
     scanResults.clear();
     isScanning = true;
-    scanStateLabel = "Scan on process....";
+    scanStateLabel = "Scan in progress...";
     notifyListeners();
 
-    // Start listening for scan results FIRST
+    // Écoute les résultats du scan
     _scanSubscription = FlutterBluePlus.scanResults.listen((results) {
       scanResults = results;
       notifyListeners();
     });
 
-    // Then start the scan itself
+    // Lance le scan pendant 10 secondes
     await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
 
-    // The scan will automatically stop after 10 seconds due to the timeout
-    // We can then update the UI state.
-    // It's better to listen to FlutterBluePlus.isScanning stream for accurate state,
-    // but for simplicity, we'll use a delayed future matching the scan timeout.
-    // A more robust solution would be to listen to FlutterBluePlus.isScanning.
-    Future.delayed(const Duration(seconds: 11), () { // A little after the scan timeout
-      if (isScanning) { // Only update if still scanning (not manually stopped)
-        isScanning = false;
-        int nbrDevicesFounded = scanResults.length;
-        scanStateLabel = "Scan Terminated, $nbrDevicesFounded Devices founded";
-        _scanSubscription?.cancel(); // Cancel subscription when scan is done
+    // Surveille la fin du scan via le stream officiel
+    FlutterBluePlus.isScanning.listen((scanning) {
+      isScanning = scanning;
+      if (!scanning) {
+        final count = scanResults.length;
+        scanStateLabel = "Scan complete: $count devices found.";
+        _scanSubscription?.cancel();
         notifyListeners();
       }
     });
@@ -166,41 +168,74 @@ class BleController extends ChangeNotifier {
   void stopScan() {
     FlutterBluePlus.stopScan();
     isScanning = false;
-    _scanSubscription?.cancel(); // Ensure subscription is cancelled
-    scanStateLabel = "Click on StartScan button to detect nearby BLE devices!";
+    _scanSubscription?.cancel();
+    scanStateLabel = "Click on Start Scan button to detect nearby BLE devices!";
     notifyListeners();
   }
 
-  // Le reste des méthodes (connect, disconnect, etc.)
+  // --- CONNECT / DESCONNECT---
   Future<void> connect(BluetoothDevice device) async {
-    // ... code inchangé ...
-    /*_connectionState = BleConnectionState.connecting;
+    _connectionState = BleConnectionState.connecting;
     notifyListeners();
+
     try {
       await device.connect();
+      mtu = await device.mtu.first;
+      if(connectedDevice != device && connectedDevice != null){
+        retry_connection=3;
+      }
       connectedDevice = device;
       _connectionState = BleConnectionState.connected;
+
       _connectionStateSubscription = device.connectionState.listen((state) {
+
         if (state == BluetoothConnectionState.disconnected) {
-          _resetConnection();
+          if(retry_connection > 0){
+            try{
+              retry_connection--;
+              isOnRetry=true;
+              notifyListeners();
+              //connection lost retry to connect
+              connect(device);
+              Future.delayed(const Duration(seconds:3), (){
+                isOnRetry=false;
+                notifyListeners();
+              });
+            }catch(e){
+              print(e);
+            }
+            
+          }else{
+            _resetConnection();
+          }
+          
         }
       });
+
       await _discoverServices();
     } catch (e) {
       debugPrint("Failed to connect: $e");
+      showfeebck=true;
+      Future.delayed(const Duration(seconds:5), (){
+        showfeebck=false;
+        notifyListeners();
+      });
       _resetConnection();
     }
-    notifyListeners();*/
+
+    notifyListeners();
   }
 
   Future<void> disconnect() async {
     if (connectedDevice != null) {
       _connectionState = BleConnectionState.disconnecting;
-      notifyListeners();
       await connectedDevice!.disconnect();
+       _connectionState = BleConnectionState.disconnected;
+      connectedDevice=null;
+      retry_connection=0;
       _resetConnection();
+       notifyListeners();
     }
-    notifyListeners();
   }
 
   Future<void> _discoverServices() async {
@@ -210,6 +245,8 @@ class BleController extends ChangeNotifier {
   }
 
   void _resetConnection() {
+    if (_connectionState == BleConnectionState.disconnected) return;
+
     connectedDevice = null;
     services.clear();
     _connectionState = BleConnectionState.disconnected;
@@ -217,6 +254,7 @@ class BleController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- CLEAN ---
   @override
   void dispose() {
     _adapterStateSubscription?.cancel();

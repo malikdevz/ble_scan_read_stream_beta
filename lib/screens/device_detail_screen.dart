@@ -4,216 +4,156 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:provider/provider.dart';
 import '../controllers/ble_controller.dart';
 
-class DeviceDetailScreen extends StatefulWidget {
+class DeviceDetailScreen extends StatelessWidget {
   final ScanResult result;
 
   const DeviceDetailScreen({super.key, required this.result});
 
-  @override
-  State<DeviceDetailScreen> createState() => _DeviceDetailScreenState();
-}
-
-class _DeviceDetailScreenState extends State<DeviceDetailScreen> {
-  BluetoothDevice? device;
-  List<BluetoothService> services = [];
-  bool isConnected = false;
-  bool isConnectable=false;
-  bool onConnecting=false;
-  String connectionStateLabel ="Disconnected";
-  int mtu = 0;
-  StreamSubscription<BluetoothConnectionState>? _connectionSub;
-
-  @override
-  void initState() {
-    super.initState();
-    device = widget.result.device;
-    isConnectable=widget.result.advertisementData.connectable;
-    _listenToConnection(); // 👈 écouter l’état dès le départ
-  }
-
-
-
-  void _listenToConnection() {
-    _connectionSub = device!.connectionState.listen((state) {
-      setState(() => isConnected = state == BluetoothConnectionState.connected);
-
-      if (state == BluetoothConnectionState.disconnected) {
-        setState(() => connectionStateLabel ="Disconnected");
-        setState(() => isConnected = false);
-        _getServices();
-        //here we can retry to reconnect
-        /*ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Device disconnected'),
-            backgroundColor: Colors.red,
-          ),
-        );*/
-      }
-    });
-  }
-
-  Future<void> _connectToDevice() async {
-    if(isConnectable){
-      try{
-        setState(() => onConnecting = true);
-        setState(() => connectionStateLabel ="Connecting...please wait!");
-        await device!.connect(timeout: const Duration(seconds: 5));
-        mtu = await device!.mtu.first;
-        setState(() => onConnecting = false);
-        setState(() => isConnected = true);
-        setState(() => connectionStateLabel = "Connected");
-        _getServices();
-      }catch(e){
-        setState(() => onConnecting = false);
-        setState(() => isConnected = false);
-        debugPrint('❌ Connection failed: $e');
-      }
-    }
-  }
-
-  Future<void> _disconnect() async {
-    try {
-      setState(() => connectionStateLabel = "Disconnecting...please wait!");
-      await device!.disconnect();
-      setState(() => isConnected = false);
-      setState(() => connectionStateLabel = "Disconnected!");
-      _getServices();
-    } catch (e) {
-      debugPrint('⚠️ Disconnect error: $e');
-    }
-  }
-
-  Future<void> _getServices() async {
-    final s = await device!.discoverServices();
-    setState(() => services = s);
-  }
-
-  @override
-  void dispose() {
-    _connectionSub?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final deviceName =device!.platformName.isEmpty ? 'Unknown Device' : device!.platformName;
-    final ble = context.watch<BleController>();
-    
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(deviceName),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // --- Bloc d’état et boutons ---
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.blueGrey.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blueGrey.shade200),
-                ),
-                width: double.infinity,
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    Text('${device!.remoteId}',
-                        style: const TextStyle(fontWeight: FontWeight.bold,fontSize: 13, color: Colors.blue)),
-                    const SizedBox(height: 8),
-                    Text('RSSI: ${widget.result.rssi} dBm',
-                        style: const TextStyle(fontSize: 14)),
-                    const SizedBox(height: 8),
-                    if (mtu != 0)
-                      Text('MTU Size: $mtu bytes',
-                          style: const TextStyle(fontSize: 14)),
-
-                    const SizedBox(height: 16),
-                    if(isConnectable)
-                      Text(
-                        connectionStateLabel,
-                        style: TextStyle(
-                          color: onConnecting ? Colors.grey:isConnected ? Colors.green : Colors.red,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                      if(!isConnectable)
-                        Text(
-                          "This device is an advertising only (probably a beacons, trackers, or broadcasting) no possible connection",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.grey,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-                    const SizedBox(height: 8),
-                    if(isConnectable)
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(40),
-                      ),
-                      onPressed: onConnecting ? null: isConnected ? _disconnect : _connectToDevice,
-                      child: Text(onConnecting ? 'PLEASE WAIT': isConnected ? 'DISCONNECT' : 'CONNECT TO DEVICE'),
-                    ),
-                  ],
-                ),
+  // BUILD DEVICE INFO WIDGETS
+  Widget _buildDeviceInfoCard(BuildContext context, BleController ble, BleController bleReader, BluetoothDevice device) {
+    final deviceName = device.platformName.isEmpty ? 'Unknown Device' : device.platformName;
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(deviceName, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22, color: Colors.blue.shade900), textAlign: TextAlign.center),
+            const SizedBox(height: 10),
+            Text('ID: ${device.remoteId}', style: TextStyle(fontSize: 14, color: Colors.grey.shade700), textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Text('RSSI: ${result.rssi} dBm', style: TextStyle(fontSize: 14, color: Colors.grey.shade700), textAlign: TextAlign.center),
+            if (ble.mtu != 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Text('MTU Size: ${ble.mtu} bytes', style: TextStyle(fontSize: 14, color: Colors.grey.shade700), textAlign: TextAlign.center),
               ),
-
-              const SizedBox(height: 20),
-
-              // ---Device services ---
-              if(isConnectable && isConnected)
-                Text(
-                  "Services list",
-                    textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.grey,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                          ),
-                        ),
-
-              const SizedBox(height: 16),
-
-              // --- Liste des services découverts ---
-              ...services.map(_buildServiceTile).toList(),
-            ],
-          ),
+            const SizedBox(height: 20),
+            if(ble.isOnRetry)
+            Text(
+               'Trying to reconnect, Attempt number ${(3-ble.retry_connection)} in progress…',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 14,
+              ),
+            ),
+            Text(
+              ble.connectionState == BleConnectionState.connected ? 'Connected' : ble.connectionState == BleConnectionState.connecting ? 'Connecting...' : ble.connectionState == BleConnectionState.disconnecting ? 'Disconnecting...' : 'Disconnected',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: ble.connectionState == BleConnectionState.connected ? Colors.green : ble.connectionState == BleConnectionState.connecting ? Colors.grey : ble.connectionState == BleConnectionState.disconnecting ? Colors.grey : Colors.red,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if(result.advertisementData.connectable)
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(40), backgroundColor: Colors.blue, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+              onPressed: ble.connectionState == BleConnectionState.connecting ? null : ble.connectionState == BleConnectionState.connected ? bleReader.disconnect : () => bleReader.connect(device),
+              child: Text(ble.connectionState == BleConnectionState.connecting ? 'PLEASE WAIT...' : ble.connectionState == BleConnectionState.connected ? 'DISCONNECT' : 'CONNECT TO DEVICE'),
+            ),
+            if(!result.advertisementData.connectable)
+            Text(
+               'This Device is an advertising only (beacons, trackers) - Not connectable.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.red,
+                fontSize: 15,
+              ),
+            ),
+            if(ble.showfeebck)
+            Text(
+               'Fail to connect but try again, if persist this device not able to receive connection by now',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.blue.shade900,
+                fontSize: 15,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildServiceTile(BluetoothService service) {
-    return ExpansionTile(
-      title: Text(
-        'Service UUID => ${service.uuid}',
-        style: const TextStyle(fontWeight: FontWeight.bold),
+  // BUILD DEVICE SERVICE WIDGETS
+Widget _buildServicesCard(BuildContext context, BleController ble) {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text('Device Services', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blue.shade900), textAlign: TextAlign.center),
+            const SizedBox(height: 10),
+            if(ble.connectionState != BleConnectionState.connected && result.advertisementData.connectable)
+            Text('You must be connected to device to see the services lists', style: TextStyle(fontSize: 14, color: Colors.grey.shade700), textAlign: TextAlign.center),
+            if(!result.advertisementData.connectable)
+            Text('This device is not connectable', style: TextStyle(fontSize: 14, color: Colors.grey.shade700), textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            
+            if (ble.connectionState == BleConnectionState.connected && ble.services.isNotEmpty)
+              ListView(
+                shrinkWrap: true, 
+                physics: const NeverScrollableScrollPhysics(),
+                children: ble.services.map((service) {
+                  return ExpansionTile(
+                    title: Text('Service UUID => ${service.uuid}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    children: service.characteristics.map((c) {
+                      return ListTile(
+                        title: Text('Characteristic UUID => ${c.uuid}'),
+                        subtitle: Row(
+                          children: [
+                            if (c.properties.read) TextButton(onPressed: () async => await c.read(), child: const Text('Read')),
+                            if (c.properties.write) TextButton(onPressed: () async => await c.write([0x01]), child: const Text('Write')),
+                            if (c.properties.notify) TextButton(onPressed: () async => await c.setNotifyValue(!c.isNotifying), child: const Text('Subscribe')),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  );
+                }).toList(),
+              )
+            else if (ble.connectionState == BleConnectionState.connected && ble.services.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 20.0),
+                child: Center(child: Text('No services found')),
+              ),
+          ],
+        ),
       ),
-      children: service.characteristics.map(_buildCharacteristicTile).toList(),
     );
   }
 
-  Widget _buildCharacteristicTile(BluetoothCharacteristic c) {
-    return ListTile(
-      title: Text('Characteristic UUID => ${c.uuid}'),
-      subtitle: Row(
-        children: [
-          if (c.properties.read)
-            TextButton(onPressed: () async => await c.read(), child: const Text('Read')),
-          if (c.properties.write)
-            TextButton(onPressed: () async => await c.write([0x01]), child: const Text('Write')),
-          if (c.properties.notify)
-            TextButton(
-              onPressed: () async => await c.setNotifyValue(!c.isNotifying),
-              child: const Text('Subscribe'),
-            ),
-        ],
+  @override
+  Widget build(BuildContext context) {
+    final ble = context.watch<BleController>();
+    final bleReader = context.read<BleController>();
+    final device = result.device;
+    final deviceName = device.platformName.isEmpty ? 'Unknown Device' : device.platformName;
+
+    return Scaffold(
+      appBar: AppBar(title: Text(deviceName)),
+      body: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            children: [
+              _buildDeviceInfoCard(context, ble, bleReader, device),
+              const SizedBox(height: 12),
+              _buildServicesCard(context, ble),
+            ],
+          ),
+        ),
       ),
     );
   }

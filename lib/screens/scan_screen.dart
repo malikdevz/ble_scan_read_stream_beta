@@ -10,159 +10,197 @@ class ScanScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Watch pour reconstruire l'UI lors des notifications
+    // reactive provider watch
     final ble = context.watch<BleController>();
-    // Read pour appeler des fonctions sans reconstruire
+    // Static provider read
     final bleReader = context.read<BleController>();
-    // Liste de filtres possibles
+    //filters list
     final Map<String, String?> filters = {
-      'All': null, // Aucun filtre
-      'Audio Devices': '110B', // UUID Audio Sink
-      'Smartwatches': 'WATCH', // On peut filtrer par nom contenant "WATCH"
+      'All': null,
+      'Audio Devices': 'Audio Devices', // UUID Audio Sink
+      'Smartwatches': 'WATCH', // "WATCH"
     };
-
 
     return Scaffold(
       appBar: AppBar(title: const Text('BLE Scanner')),
-      body: Column(
-        children: [
-          // --- État du Bluetooth ---
-          if (ble.adapterState == BluetoothAdapterState.off)
-            Container(
-              color: Colors.red.withOpacity(0.9),
-              width: double.infinity,
-              padding: const EdgeInsets.all(12.0),
-              child: const Text(
-                'Bluetooth is turned off. Please enable it.',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-            ),
-
-          // --- Permissions ---
-          if (!ble.blePermissions)
-            Container(
-              color: Colors.red.withOpacity(0.9),
-              width: double.infinity,
-              padding: const EdgeInsets.all(12.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    'All the requested permissions are necessary for the proper functioning of the application and are used solely for that purpose, so you must grant them.',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 8),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(40)),
-                    onPressed: ble.blePermissions ? null : bleReader.requestPermission,
-                    child: const Text('Grant permissions'),
-                  ),
-                ],
-              ),
-            ),
-
-          Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-              child: Row(
-                children: [
-                  const Text(
-                    'Filter by:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: DropdownButton<String>(
-                      value: ble.deviceTypeFilter, // variable du controller
-                      items: filters.keys.map((filter) {
-                        return DropdownMenuItem<String>(
-                          value: filter,
-                          child: Text(filter),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        if (value != null) {
-                          bleReader.updateDeviceTypeFilter(value);
-                        }
-                      },
-                      isExpanded: true,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          // --- Champ de filtrage ---
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: TextField(
-              decoration: InputDecoration(
-                labelText: 'Search a device name in list',
-                prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8.0),
+      body: SingleChildScrollView(
+        child: Column(
+          children: [
+            // --- BLE Adapter state ---
+            if (ble.adapterState == BluetoothAdapterState.off)
+              Container(
+                color: Colors.red.withOpacity(0.9),
+                width: double.infinity,
+                padding: const EdgeInsets.all(12.0),
+                child: const Text(
+                  'Bluetooth is turned off. Please enable it.',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
                 ),
               ),
-              onChanged: bleReader.updateFilter,
-            ),
-          ),
 
-          // --- Scan State + Bouton Start/Stop ---
-          if (ble.blePermissions)
-            Container(
-              color: Colors.blue.withOpacity(0.9),
-              width: double.infinity,
+            // --- Permissions ---
+            if (!ble.blePermissions)
+              Container(
+                color: Colors.red.withOpacity(0.9),
+                width: double.infinity,
+                padding: const EdgeInsets.all(12.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'All the requested permissions are necessary for the proper functioning of the application and are used solely for that purpose, so you must grant them.',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(40),
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.red,
+                      ),
+                      onPressed: bleReader.requestPermission,
+                      child: const Text('Grant permissions'),
+                    ),
+                  ],
+                ),
+              ),
+
+            // --- Results control ---
+            Padding(
               padding: const EdgeInsets.all(12.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    ble.scanStateLabel,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                    textAlign: TextAlign.center,
+              child: Card(
+                elevation: 4,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                color: Colors.white,
+                child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Scan Controls',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          color: Colors.blue.shade900,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          //filter by widget
+                          const Text(
+                            'Filter by:',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: DropdownButton<String>(
+                              value: ble.deviceTypeFilter,
+                              items: filters.keys.map((filter) {
+                                return DropdownMenuItem<String>(
+                                  value: filter,
+                                  child: Text(filter),
+                                );
+                              }).toList(),
+                              onChanged: (value) {
+                                if (value != null) {
+                                  bleReader.updateDeviceTypeFilter(value);
+                                }
+                              },
+                              isExpanded: true,
+                              underline: Container(height: 1, color: Colors.grey),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      //search by name widget
+                      TextField(
+                        decoration: InputDecoration(
+                          labelText: 'Search device by name',
+                          prefixIcon: const Icon(Icons.search),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12.0),
+                        ),
+                        onChanged: bleReader.updateFilter,
+                      ),
+                      const Divider(height: 30, thickness: 1),
+                      if (ble.blePermissions)
+                        Column(
+                          children: [
+                            Text(
+                              ble.scanStateLabel,
+                              style: TextStyle(
+                                color: ble.isScanning ? Colors.blue.shade900 : Colors.grey.shade800,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 12),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                minimumSize: const Size.fromHeight(40),
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              onPressed: (ble.adapterState != BluetoothAdapterState.on)
+                                  ? null
+                                  : ble.isScanning
+                                      ? bleReader.stopScan
+                                      : bleReader.startScan,
+                              child: Text(ble.isScanning ? 'STOP SCAN' : 'START SCAN'),
+                            ),
+                          ],
+                        ),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(40)),
-                    onPressed: (ble.adapterState != BluetoothAdapterState.on)
-                        ? null
-                        : ble.isScanning
-                            ? bleReader.stopScan
-                            : bleReader.startScan,
-                    child: Text(ble.isScanning ? 'Stop Scan' : 'Start Scan'),
-                  ),
-                ],
+                ),
               ),
             ),
+            
+            const Divider(indent: 20, endIndent: 20),
 
-          const SizedBox(height: 10),
-
-          // --- Liste des appareils filtrés ---
-          Expanded(
-            child: ble.filteredScanResults.isEmpty
-                ? ble.isScanning
+            // if no device found
+            if (ble.filteredScanResults.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 40.0),
+                child: ble.isScanning
                     ? const Center(child: CircularProgressIndicator())
-                    : const Center(child: Text('No devices found'))
-                : ListView.builder(
-                    itemCount: ble.filteredScanResults.length,
-                    itemBuilder: (context, index) {
-                      final result = ble.filteredScanResults[index];
-                      return DeviceTile(
-                        result: result,
-                        onTap: () {
-                          bleReader.stopScan();
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => DeviceDetailScreen(result: result),
-                            ),
-                          );
-                        },
+                    : const Center(child: Text('No devices found')),
+              )
+            else
+              ListView.builder(
+                // display devices list
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                itemCount: ble.filteredScanResults.length,
+                itemBuilder: (context, index) {
+                  final result = ble.filteredScanResults[index];
+                  return DeviceTile(
+                    result: result,
+                    onTap: () {
+                      bleReader.stopScan();
+                      ble.disconnect();
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => DeviceDetailScreen(result: result),
+                        ),
                       );
                     },
-                  ),
-          ),
-        ],
+                  );
+                },
+              ),
+          ],
+        ),
       ),
     );
   }
