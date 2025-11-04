@@ -1,8 +1,4 @@
-Of course. Here is the complete documentation for your BLE scanner project in English, ready to be copied into a `README.md` file.
-
----
-
-# Flutter BLE Scanner
+# Flutter BLE Scanner by Malik
 
 This project is a mobile application developed with Flutter that allows scanning, connecting to, and interacting with nearby Bluetooth Low Energy (BLE) devices.
 
